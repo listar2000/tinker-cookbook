@@ -172,7 +172,8 @@ async def build_sdpo_combined_datums(
     - Columns ``0..K-1``: teacher's top-K token IDs
     - Column ``K``: the sampled token (for IS term)
 
-    Additional loss_fn_inputs stored in each datum:
+    Additional metadata stored as a Python-side sidecar (``datum._sdpo_metadata``)
+    to comply with Tinker SDK 0.16+ restrictions on ``loss_fn_inputs`` keys:
     - ``teacher_weights``: ``(N, K+1)`` — renormalized teacher probs for top-K,
       0 for the sampled-token column
     - ``is_advantages``: ``(N,)`` — teacher_lp(sampled) - student_lp(sampled)
@@ -306,16 +307,21 @@ async def build_sdpo_combined_datums(
 
             total_completion_tokens += num_tokens
 
+        # Only target_tokens goes into loss_fn_inputs (Tinker SDK 0.16+
+        # enforces that forward_backward_custom only accepts target_tokens
+        # and weights).  Extra metadata is stored as a Python-side sidecar.
         new_datum = tinker.Datum(
             model_input=datum.model_input,
             loss_fn_inputs={
                 "target_tokens": tinker.TensorData.from_torch(target_tokens_NK1),
-                "teacher_weights": tinker.TensorData.from_torch(teacher_weights_NK1),
-                "is_advantages": tinker.TensorData.from_torch(is_advantages),
-                "is_old_logprobs": tinker.TensorData.from_torch(is_old_logprobs),
-                "mask": tinker.TensorData.from_torch(mask),
             },
         )
+        new_datum._sdpo_metadata = {  # type: ignore[attr-defined]
+            "teacher_weights": teacher_weights_NK1,
+            "is_advantages": is_advantages,
+            "is_old_logprobs": is_old_logprobs,
+            "mask": mask,
+        }
         new_datums.append(new_datum)
 
     metrics: dict[str, float] = {
@@ -349,10 +355,14 @@ def sdpo_combined_loss(
     total_is = torch.tensor(0.0)
 
     for datum, lp in zip(data, logprobs):
-        teacher_weights = datum.loss_fn_inputs["teacher_weights"].to_torch()  # (N, K+1)
-        is_advantages = datum.loss_fn_inputs["is_advantages"].to_torch()  # (N,)
-        is_old_logprobs = datum.loss_fn_inputs["is_old_logprobs"].to_torch()  # (N,)
-        mask = datum.loss_fn_inputs["mask"].to_torch()  # (N,)
+        # Metadata is stored as a Python-side sidecar (not in loss_fn_inputs)
+        # to comply with Tinker SDK 0.16+ which only allows target_tokens and
+        # weights in loss_fn_inputs for forward_backward_custom.
+        meta = datum._sdpo_metadata  # type: ignore[attr-defined]
+        teacher_weights = meta["teacher_weights"]   # (N, K+1)
+        is_advantages = meta["is_advantages"]       # (N,)
+        is_old_logprobs = meta["is_old_logprobs"]   # (N,)
+        mask = meta["mask"]                         # (N,)
 
         K = teacher_weights.shape[1] - 1
 
