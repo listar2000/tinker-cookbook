@@ -161,7 +161,7 @@ async def build_sdpo_combined_datums(
     metadata_D: list[dict[str, int]],
     teacher_client: tinker.SamplingClient,
     teacher_prompts_P: list[tinker.ModelInput],
-    topk: int = 20,
+    topk: int = 19,
     max_context_length: int = 32768,
     vocab_size: int | None = None,
     skip_first_n_tokens: int = 0,
@@ -183,6 +183,12 @@ async def build_sdpo_combined_datums(
     These are consumed by :func:`sdpo_combined_loss`.
     """
     K1 = topk + 1  # K top tokens + 1 sampled token
+    if K1 > 20:
+        raise ValueError(
+            f"topk={topk} produces K+1={K1} columns in target_tokens, "
+            f"but the Tinker server limits the second dimension to 20. "
+            f"Use topk <= 19."
+        )
 
     # Step 1: Build teacher-forced sequences and extract completion info.
     teacher_forced_D: list[tinker.ModelInput] = []

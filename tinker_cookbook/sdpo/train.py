@@ -169,7 +169,7 @@ class Config:
     max_context_length: int = 32768
 
     # Distillation mode
-    topk: int = 20  # 0 = importance_sampling fallback
+    topk: int = 19  # 0 = importance_sampling fallback; max 19 (K+1 ≤ 20 server limit)
 
     # Infrastructure
     renderer_name: str | None = None
